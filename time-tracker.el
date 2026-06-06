@@ -98,3 +98,9 @@
   "Minor mode for tracking user activity and idle time."
   :global t
   (if time-tracker-mode (time-tracker-start) (time-tracker-stop)))
+
+;;;; Footer
+
+(provide 'time-tracker)
+
+;;; time-tracker.el ends here
