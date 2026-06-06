@@ -1,0 +1,13 @@
+* time-tracker.el
+
+Track time spent in Emacs buffers. A global minor mode that logs buffer activity with idle detection.
+
+** Installation
+#+BEGIN_SRC emacs-lisp
+(use-package time-tracker
+  :vc (:url "https://github.com/rsooio/time-tracker.el")
+  :config (time-tracker-mode 1))
+#+END_SRC
+
+** License
+GPLv3
