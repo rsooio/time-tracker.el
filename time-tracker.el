@@ -26,37 +26,59 @@
 (defvar time-tracker--timer nil
   "Timer object for tracking user activity.")
 
-(defvar time-tracker--start-time nil
-  "Time when the time tracker was started.")
+(defvar time-tracker--context nil
+  "Context for the current tracking buffer.")
 
-(defvar time-tracker--current-buffer-id nil
-  "Buffer currently being tracked.")
+(defun time-tracker--git-repo ()
+  "Get the Git URI for the current buffer, if applicable."
+  (let ((uri (vc-git-repository-url default-directory)))
+    (when (string-match
+           "\\(?:git@[^:]+:\\|https?://[^/]+/\\)\\(.+?\\)\\(?:\\.git\\)?$"
+           uri)
+      (match-string 1 uri))))
 
-(defun time-tracker--buffer-id ()
+(defun time-tracker--buffer-name ()
   "Get the identifier for the current buffer."
   (cond
+   ((and (vc-git-root default-directory) (or (buffer-file-name)
+                                             (eq major-mode 'dired-mode)))
+    (concat (file-relative-name (buffer-file-name)
+                                (vc-git-root default-directory))
+            "<git:" (time-tracker--git-repo) ">"))
+   ((eq major-mode 'dired-mode) (abbreviate-file-name default-directory))
    ((buffer-file-name) (abbreviate-file-name (buffer-file-name)))
    ((buffer-name) (buffer-name))
    (t "unknown")))
 
+(defun time-tracker--project-name ()
+  "Get the current project name, if applicable."
+  (cond
+   ((vc-git-root default-directory) (concat "git:" (time-tracker--git-repo)))
+   ((project-current) (project-root (project-current)))))
+
+(defun time-tracker--update-context ()
+  "Update the context for the current tracking buffer."
+  (setf time-tracker--context
+        `((start . ,(current-time))
+          (info . ,(format "%s,%s,%s"
+                           (or (time-tracker--buffer-name) "")
+                           (or (time-tracker--project-name) "")
+                           major-mode)))))
+
 (defun time-tracker--buffer-active ()
   "Function called when the user starts interacting with a buffer."
-  (unless time-tracker--start-time
-      (setf time-tracker--start-time (current-time))
-      (setf time-tracker--current-buffer-id (time-tracker--buffer-id))))
+  (unless time-tracker--context (time-tracker--update-context)))
 
 (defun time-tracker--buffer-inactive ()
   "Function called when the user stops interacting with a buffer."
-  (when time-tracker--start-time
+  (when time-tracker--context
     (write-region
-     (format "%.2f,%.2f,%s,%s\n"
-             (float-time time-tracker--start-time)
+     (format "%.2f,%.2f,%s\n"
+             (float-time (alist-get 'start time-tracker--context))
              (float-time (current-time))
-             time-tracker--current-buffer-id
-             major-mode)
+             (alist-get 'info time-tracker--context))
      nil time-tracker-log-file t 'silent)
-    (setf time-tracker--start-time nil)
-    (setf time-tracker--current-buffer-id nil)))
+    (setf time-tracker--context nil)))
 
 (defun time-tracker--buffer-switch (frame)
   "Function called when the user switches buffers."
@@ -70,37 +92,53 @@
         (time-tracker--buffer-inactive)
       (time-tracker--buffer-active))))
 
+(defun time-tracker--format-duration (seconds)
+  "Format SECONDS into a human-readable string."
+  (let* ((hours (floor seconds 3600))
+         (minutes (floor (mod seconds 3600) 60))
+         (secs (floor (mod seconds 60))))
+    (cond
+     ((> hours 0) (format "%dh %dm" hours minutes))
+     ((> minutes 0) (format "%dm %ds" minutes secs))
+     (t (format "%ds" secs)))))
+
 (defun time-tracker-stats ()
   "Display time tracking statistics."
   (interactive)
   (with-output-to-temp-buffer "*Time Tracker Stats*"
     (pop-to-buffer "*Time Tracker Stats*")
     (when (file-exists-p time-tracker-log-file)
-      (let ((data (with-temp-buffer
-                    (insert-file-contents time-tracker-log-file)
-                    (split-string (buffer-string) "\n" t)))
-            (stats (make-hash-table :test 'equal)))
+      (let* ((data (with-temp-buffer
+                     (insert-file-contents time-tracker-log-file)
+                     (split-string (buffer-string) "\n" t)))
+             (stats (make-hash-table :test 'equal))
+             (choices '((buffer . 2) (project . 3) (mode . 4)))
+             (group (completing-read "Group by: " choices nil t))
+             (index (alist-get (intern group) choices)))
         (dolist (line data)
           (let ((parts (split-string line ",")))
-            (when (= (length parts) 4)
+            (when (= (length parts) 5)
               (let* ((start-time (string-to-number (nth 0 parts)))
                      (end-time (string-to-number (nth 1 parts)))
-                     (buffer-id (nth 2 parts))
-                     ;; (mode (nth 3 parts))
-                     (duration (- end-time start-time)))
-                (puthash buffer-id (+ (gethash buffer-id stats 0) duration)
-                         stats)))))
+                     (duration (- end-time start-time))
+                     (name (nth index parts)))
+                (unless (string-empty-p name)
+                  (puthash name (+ (gethash name stats 0) duration) stats))))))
         (insert "Time Tracker Statistics\n\n")
-        (maphash (lambda (key value)
-                   (insert (format "%-75s%8.0fs\n" key value)))
-                 stats)))))
+        (let* ((stats-alist '())
+               (_ (maphash (lambda (k v) (push (cons k v) stats-alist)) stats))
+               (sorted-stats (sort stats-alist
+                                   (lambda (a b) (> (cdr a) (cdr b))))))
+          (dolist (entry sorted-stats)
+            (insert (format "%-75s%8s\n"
+                            (car entry)
+                            (time-tracker--format-duration (cdr entry))))))))))
 
 (defun time-tracker-start ()
   "Start the time tracker."
   (interactive)
   (add-hook 'window-selection-change-functions #'time-tracker--buffer-switch)
-  (setf time-tracker--start-time (current-time))
-  (setf time-tracker--current-buffer-id (time-tracker--buffer-id))
+  (time-tracker--update-context)
   (setq time-tracker--timer (run-at-time t 1 #'time-tracker--tick)))
 
 (defun time-tracker-stop ()
