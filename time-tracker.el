@@ -42,7 +42,7 @@
   (cond
    ((and (vc-git-root default-directory) (or (buffer-file-name)
                                              (eq major-mode 'dired-mode)))
-    (concat (file-relative-name (buffer-file-name)
+    (concat (file-relative-name (or (buffer-file-name) default-directory)
                                 (vc-git-root default-directory))
             "<git:" (time-tracker--git-repo) ">"))
    ((eq major-mode 'dired-mode) (abbreviate-file-name default-directory))
