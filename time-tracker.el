@@ -17,6 +17,8 @@
 
 ;;; Code:
 
+(require 'vc-git)
+
 (defvar time-tracker-idle-threshold 300
   "Threshold in seconds for considering the user idle.")
 
