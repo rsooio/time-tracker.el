@@ -71,16 +71,19 @@
   "Function called when the user starts interacting with a buffer."
   (unless time-tracker--context (time-tracker--update-context)))
 
-(defun time-tracker--buffer-inactive ()
-  "Function called when the user stops interacting with a buffer."
+(defun time-tracker--buffer-inactive (&optional end-time)
+  "Close the current tracking session.
+When END-TIME (float seconds) is given, use it as the session end;
+otherwise use the current time."
   (when time-tracker--context
-    (write-region
-     (format "%.2f,%.2f,%s\n"
-             (float-time (alist-get 'start time-tracker--context))
-             (float-time (current-time))
-             (alist-get 'info time-tracker--context))
-     nil time-tracker-log-file t 'silent)
-    (setf time-tracker--context nil)))
+    (let ((end (or end-time (float-time))))
+      (write-region
+       (format "%.2f,%.2f,%s\n"
+               (float-time (alist-get 'start time-tracker--context))
+               end
+               (alist-get 'info time-tracker--context))
+       nil time-tracker-log-file t 'silent)
+      (setf time-tracker--context nil))))
 
 (defun time-tracker--buffer-switch (frame)
   "Function called when the user switches buffers."
@@ -91,7 +94,8 @@
   "Function called periodically to check user activity."
   (let ((idle-time (float-time (or (current-idle-time) 0))))
     (if (> idle-time time-tracker-idle-threshold)
-        (time-tracker--buffer-inactive)
+        (time-tracker--buffer-inactive
+         (+ (- (float-time) idle-time) time-tracker-idle-threshold))
       (time-tracker--buffer-active))))
 
 (defun time-tracker--format-duration (seconds)
