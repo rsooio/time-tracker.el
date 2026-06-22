@@ -108,8 +108,17 @@ otherwise use the current time."
      ((> minutes 0) (format "%dm %ds" minutes secs))
      (t (format "%ds" secs)))))
 
+(defun time-tracker--week-key (timestamp)
+  "Return a week key for TIMESTAMP (float seconds since epoch).
+Format is YYYY-MM-DD (Monday of that ISO week)."
+  (let* ((dow (string-to-number (format-time-string "%u" timestamp)))
+         (monday (- timestamp (* (- dow 1) 86400.0))))
+    (format-time-string "%Y-%m-%d" monday)))
+
 (defun time-tracker-stats ()
-  "Display time tracking statistics."
+  "Display time tracking statistics.
+Prompts for a category to group by and a time frequency.
+Time frequency can be none (totals), daily, weekly, or monthly."
   (interactive)
   (with-output-to-temp-buffer "*Time Tracker Stats*"
     (pop-to-buffer "*Time Tracker Stats*")
@@ -117,28 +126,60 @@ otherwise use the current time."
       (let* ((data (with-temp-buffer
                      (insert-file-contents time-tracker-log-file)
                      (split-string (buffer-string) "\n" t)))
-             (stats (make-hash-table :test 'equal))
              (choices '((buffer . 2) (project . 3) (mode . 4)))
              (group (completing-read "Group by: " choices nil t))
-             (index (alist-get (intern group) choices)))
+             (index (alist-get (intern group) choices))
+             (freq (completing-read "Time frequency: "
+                                    '("none" "daily" "weekly" "monthly")
+                                    nil t))
+             (stats (make-hash-table :test 'equal)))
         (dolist (line data)
           (let ((parts (split-string line ",")))
             (when (= (length parts) 5)
               (let* ((start-time (string-to-number (nth 0 parts)))
                      (end-time (string-to-number (nth 1 parts)))
                      (duration (- end-time start-time))
-                     (name (nth index parts)))
+                     (name (nth index parts))
+                     (time-key
+                      (pcase freq
+                        ("daily" (format-time-string "%Y-%m-%d" start-time))
+                        ("weekly" (time-tracker--week-key start-time))
+                        ("monthly" (format-time-string "%Y-%m" start-time))
+                        (_ nil))))
                 (unless (string-empty-p name)
-                  (puthash name (+ (gethash name stats 0) duration) stats))))))
-        (insert "Time Tracker Statistics\n\n")
-        (let* ((stats-alist '())
-               (_ (maphash (lambda (k v) (push (cons k v) stats-alist)) stats))
-               (sorted-stats (sort stats-alist
-                                   (lambda (a b) (> (cdr a) (cdr b))))))
-          (dolist (entry sorted-stats)
-            (insert (format "%-75s%8s\n"
-                            (car entry)
-                            (time-tracker--format-duration (cdr entry))))))))))
+                  (let ((key (cons time-key name)))
+                    (puthash key (+ (gethash key stats 0) duration) stats)))))))
+        (insert (format "Time Tracker Statistics (by %s" group))
+        (unless (string= freq "none")
+          (insert (format ", %s" freq)))
+        (insert ")\n\n")
+        (if (string= freq "none")
+            (let ((flat '()))
+              (maphash (lambda (k v) (push (cons (cdr k) v) flat)) stats)
+              (setq flat (sort flat (lambda (a b) (> (cdr a) (cdr b)))))
+              (dolist (entry flat)
+                (insert (format "%-75s%8s\n"
+                                (car entry)
+                                (time-tracker--format-duration (cdr entry))))))
+          (let ((time-keys '()))
+            (maphash (lambda (k _)
+                       (unless (member (car k) time-keys)
+                         (push (car k) time-keys)))
+                     stats)
+            (setq time-keys (sort time-keys #'string<))
+            (dolist (tk time-keys)
+              (insert (format "\n%s:\n" tk))
+              (let ((entries '()))
+                (maphash (lambda (k v)
+                           (when (string= (car k) tk)
+                             (push (cons (cdr k) v) entries)))
+                         stats)
+                (setq entries (sort entries (lambda (a b) (> (cdr a) (cdr b)))))
+                (dolist (entry entries)
+                  (insert (format "  %-73s%8s\n"
+                                  (car entry)
+                                  (time-tracker--format-duration (cdr entry))))))))
+        (insert "\n"))))))
 
 (defun time-tracker-start ()
   "Start the time tracker."
