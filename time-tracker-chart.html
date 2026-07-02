@@ -1,0 +1,661 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Time Tracker</title>
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.7/dist/chart.umd.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/chartjs-plugin-zoom@2.2.0/dist/chartjs-plugin-zoom.min.js"></script>
+<style>
+  :root {
+    --bg: #1e1e1e;
+    --fg: #d4d4d4;
+    --border: #3c3c3c;
+    --accent: #569cd6;
+    --muted: #808080;
+    --row-even: #252525;
+    --row-hover: #2a2d3a;
+  }
+  *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+  body {
+    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+    background: var(--bg);
+    color: var(--fg);
+    height: 100vh;
+    display: flex;
+    flex-direction: column;
+    padding: 20px;
+    overflow: hidden;
+  }
+  header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    margin-bottom: 8px;
+    flex-wrap: wrap;
+    gap: 12px;
+    flex-shrink: 0;
+  }
+  h1 { font-size: 1.4rem; font-weight: 600; }
+  .controls { display: flex; gap: 16px; flex-wrap: wrap; align-items: center; }
+  .btn-group { display: flex; gap: 0; }
+  .btn-group-label {
+    font-size: 0.78rem;
+    color: var(--muted);
+    text-transform: uppercase;
+    align-self: center;
+  }
+  .btn-group button {
+    background: transparent;
+    color: var(--muted);
+    border: 1px solid var(--border);
+    padding: 5px 12px;
+    font-size: 0.8rem;
+    cursor: pointer;
+    transition: color 0.12s, background 0.12s;
+  }
+  .btn-group button:first-child { border-radius: 4px 0 0 4px; }
+  .btn-group button:last-child { border-radius: 0 4px 4px 0; }
+  .btn-group button:not(:first-child) { margin-left: -1px; }
+  .btn-group button.active {
+    color: var(--fg);
+    background: var(--accent);
+    border-color: var(--accent);
+  }
+  .btn-group button:hover:not(.active) { color: #b0b0b0; background: #2a2a2a; }
+  .tab-bar { display: flex; gap: 2px; flex-shrink: 0; }
+  .tab-bar button {
+    background: transparent;
+    color: var(--muted);
+    border: 1px solid var(--border);
+    border-bottom: none;
+    padding: 8px 18px;
+    font-size: 0.85rem;
+    cursor: pointer;
+    border-radius: 4px 4px 0 0;
+    transition: color 0.15s, background 0.15s;
+  }
+  .tab-bar button.active { color: var(--fg); background: #2d2d2d; }
+  .tab-bar button:hover:not(.active) { color: #b0b0b0; }
+  .tab-content {
+    display: none;
+    flex: 1;
+    min-height: 0;
+    flex-direction: column;
+  }
+  .tab-content.active { display: flex; }
+  .chart-wrap {
+    background: #252525;
+    border: 1px solid var(--border);
+    border-radius: 0 0 6px 6px;
+    padding: 20px;
+    flex: 1;
+    min-height: 0;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    position: relative;
+  }
+  .chart-tab-first .chart-wrap { border-radius: 0 6px 6px 6px; }
+  .no-data {
+    text-align: center;
+    color: var(--muted);
+    font-size: 0.95rem;
+    position: absolute;
+    top: 50%;
+    left: 50%;
+    transform: translate(-50%, -50%);
+  }
+  table {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 0.9rem;
+  }
+  th, td { text-align: left; padding: 8px 12px; border-bottom: 1px solid var(--border); }
+  th { color: var(--muted); font-weight: 600; font-size: 0.8rem; text-transform: uppercase; }
+  tr:nth-child(even) { background: var(--row-even); }
+  tr:hover { background: var(--row-hover); }
+  .num { text-align: right; font-variant-numeric: tabular-nums; }
+  .table-wrap { flex: 1; overflow-y: auto; min-height: 0; }
+</style>
+</head>
+<body>
+
+<header>
+  <h1>Time Tracker</h1>
+  <div class="controls">
+    <span class="btn-group-label">Group by</span>
+    <div class="btn-group" id="groupByGroup">
+      <button value="2" class="active">Buffer</button>
+      <button value="3">Project</button>
+      <button value="4">Mode</button>
+    </div>
+    <span class="btn-group-label">Freq</span>
+    <div class="btn-group" id="freqGroup">
+      <button value="" class="active">Totals</button>
+      <button value="hourly">Hr</button>
+      <button value="daily">Day</button>
+      <button value="weekly">Wk</button>
+      <button value="monthly">Mo</button>
+    </div>
+  </div>
+</header>
+
+<div class="tab-bar">
+  <button data-tab="chart" class="active">Chart</button>
+  <button data-tab="activity">Activity</button>
+  <button data-tab="table">Table</button>
+</div>
+
+<div id="chartTab" class="tab-content active chart-tab-first">
+  <div class="chart-wrap">
+    <canvas id="mainChart"></canvas>
+    <div id="chartNoData" class="no-data" style="display:none">No data to display.</div>
+  </div>
+</div>
+<div id="activityTab" class="tab-content">
+  <div class="chart-wrap">
+    <canvas id="activityChart"></canvas>
+    <div id="activityNoData" class="no-data" style="display:none">No data to display.</div>
+  </div>
+</div>
+<div id="tableTab" class="tab-content">
+  <div class="table-wrap" id="tableContent"></div>
+  <div id="tableNoData" class="no-data" style="display:none">No data to display.</div>
+</div>
+
+<script>
+const RAW_DATA = __DATA_PLACEHOLDER__;
+
+const groupByLabel = { "2": "Buffer", "3": "Project", "4": "Mode" };
+
+/* ── state ──────────────────────────────────────────────── */
+
+function activeBtn(id) { return document.querySelector("#" + id + " button.active"); }
+function currentGroupBy() { return parseInt(activeBtn("groupByGroup").value, 10); }
+function currentFreq() { return activeBtn("freqGroup").value; }
+
+/* ── data ───────────────────────────────────────────────── */
+
+function parseData() {
+  const rows = [];
+  const gIdx = currentGroupBy();
+  for (const line of RAW_DATA) {
+    const parts = line.split(",");
+    if (parts.length !== 5) continue;
+    const start = parseFloat(parts[0]);
+    const end = parseFloat(parts[1]);
+    if (isNaN(start) || isNaN(end) || end <= start) continue;
+    const name = parts[gIdx];
+    if (!name) continue;
+    rows.push({ start, end, dur: end - start, name });
+  }
+  return rows;
+}
+
+function pad(n) { return String(n).padStart(2, "0"); }
+
+function fmtLocal(ts) {
+  const d = new Date(ts * 1000);
+  const y = d.getFullYear();
+  const mo = pad(d.getMonth() + 1);
+  const day = pad(d.getDate());
+  const h = pad(d.getHours());
+  return { y, mo, day, h };
+}
+
+function getWeekKey(ts) {
+  const d = new Date(ts * 1000);
+  const day = d.getDay();
+  const monday = new Date(d);
+  monday.setDate(d.getDate() - (day === 0 ? 6 : day - 1));
+  const y = monday.getFullYear();
+  const mo = pad(monday.getMonth() + 1);
+  const dd = pad(monday.getDate());
+  return y + "-" + mo + "-" + dd;
+}
+
+/* time key at the exact frequency */
+function freqKey(ts, freq) {
+  const l = fmtLocal(ts);
+  switch (freq) {
+    case "hourly":  return l.y + "-" + l.mo + "-" + l.day + "T" + l.h;
+    case "daily":   return l.y + "-" + l.mo + "-" + l.day;
+    case "weekly":  return getWeekKey(ts);
+    case "monthly": return l.y + "-" + l.mo;
+    default: return null;
+  }
+}
+
+/* compact x-axis label */
+function freqLabel(key, freq) {
+  switch (freq) {
+    case "hourly":  return key.slice(5, 10) + " " + key.slice(11, 13);   // "01-15 08"
+    case "daily":   return key.slice(5);            // "01-15"
+    case "weekly":  return key.slice(5);            // "01-06"
+    case "monthly": return key;                     // "2026-01"
+    default: return key;
+  }
+}
+
+/* aggregate by freq, splitting sessions that cross period boundaries */
+function aggregateFreq(rows, freq) {
+  const map = new Map();
+  for (const r of rows) {
+    let t = r.start;
+    while (t < r.end) {
+      const fk = freqKey(t, freq);
+      if (!fk) break;
+      const next = nextFreqKey(fk, freq);
+      const nextTs = parseKeyTs(next, freq);
+      const segEnd = Math.min(r.end, nextTs);
+      const segDur = segEnd - t;
+      if (segDur > 0) {
+        map.set(fk, (map.get(fk) || 0) + segDur);
+      }
+      t = nextTs;
+    }
+  }
+  return map;
+}
+
+/* aggregate by freq + group name, splitting across period boundaries */
+function aggregateFreqGrouped(rows, freq) {
+  const map = new Map();
+  for (const r of rows) {
+    let t = r.start;
+    while (t < r.end) {
+      const fk = freqKey(t, freq);
+      const key = fk ? fk + "|" + r.name : r.name;
+      if (!fk) { map.set(key, (map.get(key) || 0) + (r.end - t)); break; }
+      const next = nextFreqKey(fk, freq);
+      const nextTs = parseKeyTs(next, freq);
+      const segEnd = Math.min(r.end, nextTs);
+      const segDur = segEnd - t;
+      if (segDur > 0) {
+        map.set(key, (map.get(key) || 0) + segDur);
+      }
+      t = nextTs;
+    }
+  }
+  return map;
+}
+
+function nextFreqKey(key, freq) {
+  const parts = key.split("T");
+  const datePart = parts[0];
+  const [y, mo, day] = datePart.split("-").map(Number);
+  const h = parts[1] ? parseInt(parts[1], 10) : 0;
+  const d = new Date(y, mo - 1, day, h);
+  switch (freq) {
+    case "hourly":  d.setHours(d.getHours() + 1); break;
+    case "daily":   d.setDate(d.getDate() + 1); break;
+    case "weekly":  d.setDate(d.getDate() + 7); break;
+    case "monthly": d.setMonth(d.getMonth() + 1); break;
+  }
+  return freqKey(d.getTime() / 1000, freq);
+}
+
+function parseKeyTs(key, freq) {
+  const parts = key.split("T");
+  const [y, mo, day] = parts[0].split("-").map(Number);
+  const h = parts[1] ? parseInt(parts[1], 10) : 0;
+  return new Date(y, mo - 1, freq === "monthly" ? 1 : day, h).getTime() / 1000;
+}
+
+function periodHours(key, freq) {
+  switch (freq) {
+    case "hourly": return 1;
+    case "daily":  return 24;
+    case "weekly": return 168;
+    case "monthly": {
+      const y = parseInt(key.slice(0, 4));
+      const m = parseInt(key.slice(5, 7));
+      return new Date(y, m, 0).getDate() * 24;
+    }
+    default: return 1;
+  }
+}
+
+function fmtDuration(secs) {
+  const h = Math.floor(secs / 3600);
+  const m = Math.floor((secs % 3600) / 60);
+  if (h > 0) return h + "h " + m + "m";
+  if (m > 0) return m + "m " + Math.floor(secs % 60) + "s";
+  return Math.floor(secs) + "s";
+}
+
+/* ── chart state ───────────────────────────────────────── */
+
+let chart = null;
+let actChart = null;
+
+const palette = [
+  "#569cd6", "#d16969", "#6a9955", "#d7ba7d",
+  "#c586c0", "#4ec9b0", "#ce9178", "#9cdcfe",
+  "#b5cea8", "#808080"
+];
+
+function resizeCanvas(canvas) {
+  const wrap = canvas.parentElement;
+  canvas.width = wrap.clientWidth - 40;
+  canvas.height = wrap.clientHeight - 40;
+}
+
+/* ── Chart tab ──────────────────────────────────────────── */
+
+function renderChart() {
+  const rows = parseData();
+  const freq = currentFreq();
+  const canvas = document.getElementById("mainChart");
+  const noData = document.getElementById("chartNoData");
+
+  if (rows.length === 0) {
+    canvas.style.display = "none";
+    noData.style.display = "";
+    if (chart) { chart.destroy(); chart = null; }
+    return;
+  }
+  canvas.style.display = "";
+  noData.style.display = "none";
+  resizeCanvas(canvas);
+
+  if (!freq) {
+    const agg = aggregateFreqGrouped(rows, freq);
+    const sorted = [...agg.entries()].sort((a, b) => b[1] - a[1]).slice(0, 30);
+    renderBarChart(sorted.map(e => e[0]), sorted.map(e => e[1]));
+  } else {
+    const agg = aggregateFreqGrouped(rows, freq);
+    const timeKeys = [...new Set([...agg.keys()].map(k => k.split("|")[0]))].sort();
+    const catSet = new Set([...agg.keys()].map(k => k.split("|")[1]));
+    const catTotals = new Map();
+    for (const [k, v] of agg) catTotals.set(k.split("|")[1], (catTotals.get(k.split("|")[1]) || 0) + v);
+    const topCats = [...catTotals.entries()].sort((a, b) => b[1] - a[1]).slice(0, 8).map(e => e[0]);
+    const otherCats = [...catSet].filter(c => !topCats.includes(c));
+
+    const datasets = topCats.map((cat, i) => ({
+      label: cat,
+      data: timeKeys.map(tk => (agg.get(tk + "|" + cat) || 0) / 3600),
+      backgroundColor: palette[i % palette.length],
+    }));
+    if (otherCats.length > 0) {
+      datasets.push({
+        label: "Other",
+        data: timeKeys.map(tk => {
+          let sum = 0;
+          for (const oc of otherCats) sum += agg.get(tk + "|" + oc) || 0;
+          return sum / 3600;
+        }),
+        backgroundColor: palette[palette.length - 2] + "80",
+      });
+    }
+    renderStackedBar(timeKeys, datasets);
+  }
+}
+
+function renderBarChart(labels, values) {
+  const ctx = document.getElementById("mainChart").getContext("2d");
+  if (chart) chart.destroy();
+  chart = new Chart(ctx, {
+    type: "bar",
+    data: {
+      labels,
+      datasets: [{ label: "Duration", data: values.map(v => v / 3600), backgroundColor: labels.map((_, i) => palette[i % palette.length]), borderWidth: 0 }],
+    },
+    options: {
+      indexAxis: "y", responsive: true, maintainAspectRatio: false,
+      plugins: { legend: { display: false }, tooltip: { callbacks: { label: ctx => fmtDuration(ctx.raw * 3600) } } },
+      scales: {
+        x: { title: { display: true, text: "Hours", color: "#808080" }, ticks: { color: "#808080" }, grid: { color: "#3c3c3c33" } },
+        y: { ticks: { color: "#d4d4d4", font: { size: 11 } }, grid: { display: false } },
+      },
+    },
+  });
+}
+
+function renderStackedBar(labels, datasets) {
+  const ctx = document.getElementById("mainChart").getContext("2d");
+  if (chart) chart.destroy();
+  chart = new Chart(ctx, {
+    type: "bar", data: { labels, datasets },
+    options: {
+      responsive: true, maintainAspectRatio: false,
+      plugins: {
+        tooltip: { callbacks: { label: ctx => ctx.dataset.label + ": " + fmtDuration(ctx.raw * 3600) } },
+        legend: { position: "bottom", labels: { color: "#d4d4d4", boxWidth: 12, padding: 12, font: { size: 11 } } },
+      },
+      scales: {
+        x: { stacked: true, ticks: { color: "#808080", font: { size: 10 } }, grid: { color: "#3c3c3c33" } },
+        y: { stacked: true, title: { display: true, text: "Hours", color: "#808080" }, ticks: { color: "#808080" }, grid: { color: "#3c3c3c33" } },
+      },
+    },
+  });
+}
+
+/* ── Activity tab ───────────────────────────────────────── */
+
+function renderActivity() {
+  const rows = parseData();
+  const freq = currentFreq();
+  const canvas = document.getElementById("activityChart");
+  const noData = document.getElementById("activityNoData");
+
+  if (!freq || rows.length === 0) {
+    canvas.style.display = "none";
+    noData.style.display = "";
+    noData.textContent = !freq ? "Select a frequency." : "No data to display.";
+    if (actChart) { actChart.destroy(); actChart = null; }
+    return;
+  }
+  canvas.style.display = "";
+  noData.style.display = "none";
+  resizeCanvas(canvas);
+
+  const agg = aggregateFreq(rows, freq);
+  const keys = [...agg.keys()].sort();
+
+  // Fill gaps: generate all keys from min to max, insert 0 for missing.
+  const allKeys = [];
+  if (keys.length > 0) {
+    const first = keys[0];
+    const last = keys[keys.length - 1];
+    let cursor = first;
+    while (cursor <= last) {
+      allKeys.push(cursor);
+      cursor = nextFreqKey(cursor, freq);
+    }
+  }
+  const rawValues = allKeys.map(k => (agg.get(k) || 0) / 3600);
+  const pctValues = rawValues.map((v, i) => {
+    const denom = periodHours(allKeys[i], freq);
+    return denom > 0 ? (v / denom) * 100 : 0;
+  });
+  const labels = allKeys.map(k => freqLabel(k, freq));
+
+  const totalCount = allKeys.length;
+
+  const defaultWindow = { hourly: 24, daily: 7, weekly: 5, monthly: 12 };
+  const windowSize = defaultWindow[freq] || totalCount;
+  const initialMax = totalCount - 1;
+  const initialMin = Math.max(0, initialMax - windowSize + 1);
+
+  const ctx = canvas.getContext("2d");
+  if (actChart) actChart.destroy();
+  actChart = new Chart(ctx, {
+    type: "line",
+    data: {
+      labels,
+      datasets: [{
+        data: pctValues,
+        borderColor: "#569cd6",
+        backgroundColor: "#569cd633",
+        borderWidth: 1.5,
+        tension: 0.2,
+        pointRadius: 0,
+        pointHitRadius: 8,
+        fill: true,
+      }],
+    },
+    options: {
+      responsive: true,
+      maintainAspectRatio: false,
+      animation: false,
+      interaction: { mode: "nearest", axis: "x", intersect: false },
+      plugins: {
+        legend: { display: false },
+        tooltip: {
+          callbacks: {
+            title: items => {
+              const k = allKeys[items[0].dataIndex];
+              return freq === "hourly"
+                ? k.slice(0, 4) + "-" + k.slice(5, 10) + " " + k.slice(11, 13) + ":00"
+                : k;
+            },
+            label: ctx => {
+              const pct = ctx.raw.toFixed(2) + "%";
+              const dur = fmtDuration(rawValues[ctx.dataIndex] * 3600);
+              return pct + "  (" + dur + ")";
+            },
+          },
+        },
+        zoom: {
+          pan: { enabled: false },
+          zoom: {
+            wheel: { enabled: true, modifierKey: null },
+            drag: { enabled: true, modifierKey: "shift", backgroundColor: "#569cd633", borderColor: "#569cd6" },
+            mode: "x",
+          },
+          limits: { x: { min: 0, max: Math.max(0, totalCount - 1), minRange: 1 } },
+        },
+      },
+      scales: {
+        x: {
+          min: initialMin,
+          max: initialMax,
+          ticks: { color: "#808080", font: { size: 10 }, maxRotation: 45 },
+          grid: { color: "#3c3c3c33" },
+        },
+        y: {
+          title: { display: true, text: "%", color: "#808080" },
+          ticks: { color: "#808080", callback: v => v.toFixed(1) + "%" },
+          grid: { color: "#3c3c3c33" },
+          beginAtZero: true,
+        },
+      },
+    },
+  });
+}
+
+/* ── Table tab ──────────────────────────────────────────── */
+
+function renderTable() {
+  const rows = parseData();
+  const freq = currentFreq();
+  const tableContent = document.getElementById("tableContent");
+  const noData = document.getElementById("tableNoData");
+
+  if (rows.length === 0) {
+    tableContent.innerHTML = "";
+    noData.style.display = "";
+    return;
+  }
+  noData.style.display = "none";
+
+  const label = groupByLabel[currentGroupBy()] || "Category";
+  const agg = aggregateFreqGrouped(rows, freq);
+  const entries = [...agg.entries()].sort((a, b) => b[1] - a[1]);
+  const total = entries.reduce((s, e) => s + e[1], 0);
+
+  let html = "<table><thead><tr>";
+  if (freq) html += "<th>Period</th>";
+  html += "<th>" + label + "</th><th class='num'>Duration</th><th class='num'>Share</th>";
+  html += "</tr></thead><tbody>";
+
+  for (const [key, dur] of entries) {
+    const pct = total > 0 ? ((dur / total) * 100).toFixed(1) : "0.0";
+    html += "<tr>";
+    if (freq) {
+      const [tk, name] = key.split("|");
+      html += "<td>" + tk + "</td><td>" + name + "</td>";
+    } else {
+      html += "<td>" + key + "</td>";
+    }
+    html += "<td class='num'>" + fmtDuration(dur) + "</td>";
+    html += "<td class='num'>" + pct + "%</td></tr>";
+  }
+  html += "</tbody></table>";
+  tableContent.innerHTML = html;
+}
+
+/* ── events ─────────────────────────────────────────────── */
+
+function refresh() { renderChart(); renderActivity(); renderTable(); }
+
+function setupBtnGroup(groupId, onChange) {
+  document.querySelectorAll("#" + groupId + " button").forEach(btn => {
+    btn.addEventListener("click", () => {
+      if (btn.classList.contains("active")) return;
+      document.querySelectorAll("#" + groupId + " button").forEach(b => b.classList.remove("active"));
+      btn.classList.add("active");
+      onChange();
+    });
+  });
+}
+setupBtnGroup("groupByGroup", refresh);
+setupBtnGroup("freqGroup", refresh);
+
+document.querySelectorAll(".tab-bar button").forEach(btn => {
+  btn.addEventListener("click", () => {
+    document.querySelectorAll(".tab-bar button").forEach(b => b.classList.remove("active"));
+    btn.classList.add("active");
+    const tabId = btn.dataset.tab;
+    document.querySelectorAll(".tab-content").forEach(t => t.classList.remove("active"));
+    document.getElementById(tabId + "Tab").classList.add("active");
+    if (tabId === "chart") renderChart();
+    else if (tabId === "activity") renderActivity();
+  });
+});
+
+window.addEventListener("resize", () => { renderChart(); renderActivity(); });
+
+refresh();
+
+/* ── manual drag-to-pan (zoom plugin pan conflicts with drag zoom) ─ */
+
+let panState = null;
+const actCanvas = document.getElementById("activityChart");
+actCanvas.style.cursor = "grab";
+
+actCanvas.addEventListener("mousedown", (e) => {
+  if (e.shiftKey || !actChart) return;
+  const scale = actChart.scales.x;
+  panState = { startX: e.clientX, min: scale.min, max: scale.max };
+  actCanvas.style.cursor = "grabbing";
+});
+
+window.addEventListener("mousemove", (e) => {
+  if (!panState || !actChart) return;
+  const scale = actChart.scales.x;
+  const pxRange = scale.getPixelForValue(panState.max) - scale.getPixelForValue(panState.min);
+  if (pxRange <= 0) return;
+  const valPerPx = (panState.max - panState.min) / pxRange;
+  const delta = (e.clientX - panState.startX) * valPerPx;
+  const range = panState.max - panState.min;
+  const maxIdx = actChart.data.datasets[0].data.length - 1;
+  let newMin = panState.min - delta;
+  let newMax = panState.max - delta;
+  if (newMin < 0) { newMin = 0; newMax = range; }
+  if (newMax > maxIdx) { newMax = maxIdx; newMin = newMax - range; }
+  scale.options.min = newMin;
+  scale.options.max = newMax;
+  actChart.update("none");
+});
+
+window.addEventListener("mouseup", () => {
+  if (!panState) return;
+  actCanvas.style.cursor = "";
+  panState = null;
+});
+</script>
+</body>
+</html>

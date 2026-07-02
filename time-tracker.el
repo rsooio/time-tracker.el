@@ -181,6 +181,33 @@ Time frequency can be none (totals), daily, weekly, or monthly."
                                   (time-tracker--format-duration (cdr entry))))))))
         (insert "\n"))))))
 
+(defun time-tracker-chart ()
+  "Generate an HTML chart from time tracking data and open in browser."
+  (interactive)
+  (unless (file-exists-p time-tracker-log-file)
+    (user-error "No time tracking data found at %s" time-tracker-log-file))
+  (let* ((template-file (expand-file-name
+                         "time-tracker-chart.html"
+                         (file-name-directory (locate-library "time-tracker"))))
+         (template (with-temp-buffer
+                     (insert-file-contents template-file)
+                     (buffer-string)))
+         (data-lines (with-temp-buffer
+                       (insert-file-contents time-tracker-log-file)
+                       (split-string (buffer-string) "\n" t)))
+         (json-lines (mapcar (lambda (line)
+                               (concat "\"" (string-replace "\\" "\\\\"
+                                           (string-replace "\"" "\\\"" line)) "\""))
+                             data-lines))
+         (data-json (concat "[\n" (mapconcat #'identity json-lines ",\n") "\n]"))
+         (html (string-replace "__DATA_PLACEHOLDER__" data-json template))
+         (outfile (make-temp-file "time-tracker-chart-" nil ".html")))
+    (with-temp-buffer
+      (insert html)
+      (write-region nil nil outfile nil 'silent))
+    (browse-url (concat "file://" outfile))
+    (message "Chart written to %s" outfile)))
+
 (defun time-tracker-start ()
   "Start the time tracker."
   (interactive)
