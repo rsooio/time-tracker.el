@@ -33,11 +33,13 @@
 
 (defun time-tracker--git-repo ()
   "Get the Git URI for the current buffer, if applicable."
-  (let ((uri (vc-git-repository-url default-directory)))
-    (when (string-match
-           "\\(?:git@[^:]+:\\|https?://[^/]+/\\)\\(.+?\\)\\(?:\\.git\\)?$"
-           uri)
-      (match-string 1 uri))))
+  (if-let ((remote (vc-git--run-command-string nil "remote"))
+           (_ (not (string-empty-p remote)))
+           (uri (vc-git-repository-url default-directory (string-trim remote))))
+      (when (string-match
+             "\\(?:git@[^:]+:\\|https?://[^/]+/\\)\\(.+?\\)\\(?:\\.git\\)?$"
+             uri)
+        (match-string 1 uri))))
 
 (defun time-tracker--buffer-name ()
   "Get the identifier for the current buffer."
